@@ -1,0 +1,8 @@
+{
+  "name": "SmartMenu PK",
+  "description": "A premium AI-powered digital menu scanner that converts physical menus into sleek, bilingual digital experiences.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}
