@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { ApiError } from "@google/genai";
 import { parseMenuFromImageBase64 } from "@/lib/server/parseMenuFromImage";
 
 export const runtime = "nodejs";
@@ -40,13 +39,10 @@ export async function POST(request: Request) {
   const mime = raw.type && raw.type.length > 0 ? raw.type : "image/jpeg";
 
   try {
-    const categories = await parseMenuFromImageBase64(base64, mime, key);
-    return NextResponse.json(categories);
+    const { categories, usedFallback } = await parseMenuFromImageBase64(base64, mime, key);
+    return NextResponse.json({ categories, usedFallback });
   } catch (error) {
     console.error("[api/scan] Gemini error:", error);
-    if (error instanceof ApiError && error.status === 503) {
-      return NextResponse.json({ error: "unavailable" }, { status: 503 });
-    }
     if (error && typeof error === "object" && "status" in error) {
       const s = (error as { status?: number }).status;
       if (s === 503) {

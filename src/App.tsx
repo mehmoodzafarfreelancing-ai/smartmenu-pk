@@ -14,6 +14,7 @@ import { countItemsInOrder, formatPkr, subtotalFromOrder } from './utils/orderMo
 
 const HIGH_TRAFFIC_MSG =
   'AI is experiencing high traffic. Please try scanning again!';
+const OFFLINE_FALLBACK_MSG = 'Server unavailable right now. Showing prebuilt demo menu.';
 
 function isServiceUnavailableError(error: unknown): boolean {
   if (error instanceof ScanMenuError && error.status === 503) {
@@ -56,9 +57,12 @@ export default function App() {
     setToastMessage(null);
     setIsScanning(true);
     try {
-      const next = await scanMenuImage(file);
-      console.log('[App] menu data after parse (ready for state):', next);
-      setParsedData(next ?? []);
+      const result = await scanMenuImage(file);
+      console.log('[App] menu data after parse (ready for state):', result.categories);
+      setParsedData(result.categories ?? []);
+      if (result.usedFallback) {
+        setToastMessage(OFFLINE_FALLBACK_MSG);
+      }
     } catch (error) {
       console.error('Failed to parse menu:', error);
       if (isServiceUnavailableError(error)) {

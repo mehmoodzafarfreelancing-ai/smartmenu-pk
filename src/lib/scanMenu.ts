@@ -1,5 +1,10 @@
 import type { MenuCategory } from "@/types";
 
+export interface ScanMenuResult {
+  categories: MenuCategory[];
+  usedFallback: boolean;
+}
+
 export class ScanMenuError extends Error {
   constructor(
     message: string,
@@ -13,7 +18,7 @@ export class ScanMenuError extends Error {
 /**
  * POST multipart form: field `image` = File
  */
-export async function scanMenuImage(file: File): Promise<MenuCategory[]> {
+export async function scanMenuImage(file: File): Promise<ScanMenuResult> {
   const formData = new FormData();
   formData.append("image", file);
 
@@ -36,5 +41,16 @@ export async function scanMenuImage(file: File): Promise<MenuCategory[]> {
     throw new ScanMenuError(msg, res.status);
   }
 
-  return (await res.json()) as MenuCategory[];
+  const body = (await res.json()) as
+    | ScanMenuResult
+    | MenuCategory[];
+
+  if (Array.isArray(body)) {
+    return { categories: body, usedFallback: false };
+  }
+
+  return {
+    categories: Array.isArray(body?.categories) ? body.categories : [],
+    usedFallback: Boolean(body?.usedFallback),
+  };
 }

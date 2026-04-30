@@ -4,10 +4,10 @@ import { MenuCategory, Language, type MenuItem } from '../types';
 
 const CHILI = '🌶️';
 
-function spiceLevelForDisplay(item: MenuItem): 1 | 2 | 3 {
+function spiceLevelForDisplay(item: MenuItem): 1 | 2 | 3 | undefined {
   const s = item.spiceLevel;
   if (s === 1 || s === 2 || s === 3) return s;
-  return 2;
+  return undefined;
 }
 import { Sparkles, Plus, Flame, Clock, Star, Camera } from 'lucide-react';
 
@@ -163,12 +163,17 @@ export default function MenuDisplay({ categories, language, onAddToOrder }: Menu
 
                   {/* Bottom Row: Actions */}
                   <div className="flex items-center justify-between gap-4 mt-auto">
-                    <p
-                      className="text-sm leading-none tracking-tight"
-                      aria-label={`Spice level ${spiceLevelForDisplay(item)} of 3`}
-                    >
-                      {CHILI.repeat(spiceLevelForDisplay(item))}
-                    </p>
+                    <div className="text-sm leading-none tracking-tight min-h-[1rem]">
+                      {(() => {
+                        const spiceLevel = spiceLevelForDisplay(item);
+                        if (!spiceLevel) return null;
+                        return (
+                          <p aria-label={`Spice level ${spiceLevel} of 3`}>
+                            {CHILI.repeat(spiceLevel)}
+                          </p>
+                        );
+                      })()}
+                    </div>
 
                     <motion.button
                       type="button"

@@ -90,7 +90,6 @@ export const MOCK_MENU: MenuCategory[] = [
         prepTime: '5-8 min',
         calories: 80,
         isBestseller: true,
-        spiceLevel: 1,
       },
       {
         id: 'd2',
@@ -103,7 +102,6 @@ export const MOCK_MENU: MenuCategory[] = [
         prepTime: '5-10 min',
         calories: 90,
         isBestseller: false,
-        spiceLevel: 1,
       },
     ],
   },
