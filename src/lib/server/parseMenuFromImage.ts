@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { ApiError, GoogleGenAI, Type } from "@google/genai";
 import type { MenuCategory } from "@/types";
 
 const FALLBACK_MENU: MenuCategory[] = [
@@ -210,6 +210,19 @@ function wait(ms: number): Promise<void> {
   });
 }
 
+function isGeminiApiFailure(error: unknown): boolean {
+  if (error instanceof ApiError) return true;
+  if (error && typeof error === "object") {
+    if ("status" in error && typeof (error as { status?: unknown }).status === "number") {
+      return true;
+    }
+    if ("code" in error && typeof (error as { code?: unknown }).code === "number") {
+      return true;
+    }
+  }
+  return false;
+}
+
 const MENU_PROMPT = `You are an expert OCR and culinary strategist. Analyze the provided restaurant menu image and extract the data into a structured JSON format.
 
 Rules for Extraction:
@@ -258,10 +271,11 @@ export async function parseMenuFromImageBase64(
   apiKey: string
 ): Promise<{ categories: MenuCategory[]; usedFallback: boolean }> {
   const data = base64.includes(",") ? (base64.split(",")[1] || base64) : base64;
-  const model = "gemini-3.1-flash";
+  const model = "gemini-2.5-flash";
   const ai = new GoogleGenAI({ apiKey });
+  let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
   try {
-    const response = await ai.models.generateContent({
+    response = await ai.models.generateContent({
       model,
       contents: [
         {
@@ -314,7 +328,6 @@ export async function parseMenuFromImageBase64(
                       type: Type.INTEGER,
                       minimum: 1,
                       maximum: 3,
-                      nullable: true,
                     },
                   },
                   required: ["name", "price", "description"],
@@ -326,29 +339,32 @@ export async function parseMenuFromImageBase64(
         },
       },
     });
-
-    const cleaned = stripResponseMarkdown(response.text);
-    const parsed: unknown = JSON.parse(cleaned || "[]");
-    const result = normalizeToCategoryArray(parsed);
-
-    const categories = result.map((cat: any, i: number) => ({
-      ...cat,
-      items: (Array.isArray(cat?.items) ? cat.items : []).map((item: any, j: number) => {
-        const categoryTitle = cat?.title?.en ?? cat?.title ?? "";
-        const omitSpice = shouldOmitSpiceLevel(categoryTitle, item?.name);
-        const spiceLevel = omitSpice ? undefined : normalizeSpiceLevel(item?.spiceLevel);
-        return {
-          ...item,
-          id: item.id || `item-${i}-${j}`,
-          ...(spiceLevel !== undefined ? { spiceLevel } : {}),
-        };
-      }),
-    }));
-
-    return { categories, usedFallback: false };
   } catch (error) {
-    console.error("[parseMenuFromImage] Falling back to cached menu:", error);
-    await wait(2000);
-    return { categories: FALLBACK_MENU, usedFallback: true };
+    if (isGeminiApiFailure(error)) {
+      console.error("[parseMenuFromImage] Falling back to cached menu:", error);
+      await wait(2000);
+      return { categories: FALLBACK_MENU, usedFallback: true };
+    }
+    throw error;
   }
+
+  const cleaned = stripResponseMarkdown(response.text);
+  const parsed: unknown = JSON.parse(cleaned || "[]");
+  const result = normalizeToCategoryArray(parsed);
+
+  const categories = result.map((cat: any, i: number) => ({
+    ...cat,
+    items: (Array.isArray(cat?.items) ? cat.items : []).map((item: any, j: number) => {
+      const categoryTitle = cat?.title?.en ?? cat?.title ?? "";
+      const omitSpice = shouldOmitSpiceLevel(categoryTitle, item?.name);
+      const spiceLevel = omitSpice ? undefined : normalizeSpiceLevel(item?.spiceLevel);
+      return {
+        ...item,
+        id: item.id || `item-${i}-${j}`,
+        ...(spiceLevel !== undefined ? { spiceLevel } : {}),
+      };
+    }),
+  }));
+
+  return { categories, usedFallback: false };
 }

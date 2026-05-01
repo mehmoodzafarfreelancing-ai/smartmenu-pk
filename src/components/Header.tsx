@@ -3,7 +3,7 @@ import { Sparkles, Globe } from 'lucide-react';
 import { Language } from '../types';
 
 interface HeaderProps {
-  language: Language;
+  language: Language; 
   onLanguageToggle: () => void;
 }
 
