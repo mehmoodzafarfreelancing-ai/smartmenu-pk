@@ -160,7 +160,7 @@ export default function App() {
               <a href="#" className="text-[11px] uppercase tracking-[0.2em] font-bold text-white/30 hover:text-brand-primary transition-colors">Terms</a>
             </nav>
             <p className="text-[11px] text-white/10 font-sans leading-relaxed">
-              &copy; 2024 SmartMenu PK &bull; All Rights Reserved
+              &copy; 2026 SmartMenu PK &bull; All Rights Reserved
             </p>
           </div>
 
