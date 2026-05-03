@@ -16,15 +16,13 @@ export class ScanMenuError extends Error {
 }
 
 /**
- * POST multipart form: field `image` = File
+ * POST JSON: { images: string[] } — 1 or 2 data URLs or raw base64 strings.
  */
-export async function scanMenuImage(file: File): Promise<ScanMenuResult> {
-  const formData = new FormData();
-  formData.append("image", file);
-
+export async function scanMenuImages(imageBase64Strings: string[]): Promise<ScanMenuResult> {
   const res = await fetch("/api/scan", {
     method: "POST",
-    body: formData,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ images: imageBase64Strings }),
   });
 
   if (res.status === 503) {

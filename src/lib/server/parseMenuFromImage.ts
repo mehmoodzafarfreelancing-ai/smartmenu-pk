@@ -204,26 +204,20 @@ function shouldOmitSpiceLevel(categoryTitle: unknown, itemName: unknown): boolea
   );
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+/** Use cached demo menu only for rate-limit / overload (not 404 model, not auth errors). */
+function shouldUseOfflineFallback(error: unknown): boolean {
+  const status =
+    error instanceof ApiError
+      ? error.status
+      : error && typeof error === "object" && "status" in error
+        ? (error as { status?: number }).status
+        : undefined;
+  return status === 429 || status === 503;
 }
 
-function isGeminiApiFailure(error: unknown): boolean {
-  if (error instanceof ApiError) return true;
-  if (error && typeof error === "object") {
-    if ("status" in error && typeof (error as { status?: unknown }).status === "number") {
-      return true;
-    }
-    if ("code" in error && typeof (error as { code?: unknown }).code === "number") {
-      return true;
-    }
-  }
-  return false;
-}
+const MENU_PROMPT = `You are receiving either one or two images of a restaurant menu. Extract all items from all provided images into a single unified JSON structure.
 
-const MENU_PROMPT = `You are an expert OCR and culinary strategist. Analyze the provided restaurant menu image and extract the data into a structured JSON format.
+You are an expert OCR and culinary strategist. Analyze all provided menu images together and extract the data into one structured JSON format.
 
 Rules for Extraction:
 
@@ -265,29 +259,62 @@ Return ONLY this JSON structure:
 ]
 }`;
 
-export async function parseMenuFromImageBase64(
-  base64: string,
-  mimeType: string,
+/** If `response.text` is empty, concatenate text parts from the first candidate. */
+function extractTextFromCandidateParts(response: {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+}): string {
+  const parts = response.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .map((p) => (typeof p?.text === "string" ? p.text : ""))
+    .join("");
+}
+
+/** Decode a data URL or raw/base64-with-comma string into inline payload for Gemini. */
+export function decodeImagePayload(encoded: string): { data: string; mimeType: string } {
+  const s = encoded.trim();
+  if (s.startsWith("data:")) {
+    const comma = s.indexOf(",");
+    if (comma === -1) {
+      return { data: "", mimeType: "image/jpeg" };
+    }
+    const header = s.slice(5, comma);
+    const mimeType = (header.split(";")[0]?.trim() || "image/jpeg") || "image/jpeg";
+    const data = s.slice(comma + 1).replace(/\s/g, "");
+    return { data, mimeType };
+  }
+  const data = s.includes(",") ? (s.split(",")[1] || s) : s;
+  return { data, mimeType: "image/jpeg" };
+}
+
+export async function parseMenuFromImagesBase64(
+  items: { data: string; mimeType: string }[],
   apiKey: string
 ): Promise<{ categories: MenuCategory[]; usedFallback: boolean }> {
-  const data = base64.includes(",") ? (base64.split(",")[1] || base64) : base64;
-  const model = "gemini-2.5-flash";
+  const normalized = items.map((item) => {
+    const raw = item.data.includes(",") ? (item.data.split(",")[1] || item.data) : item.data;
+    const data = raw.trim();
+    const mimeType =
+      item.mimeType && item.mimeType.length > 0 ? item.mimeType : "image/jpeg";
+    return { data, mimeType };
+  });
+
+  const model = process.env.GEMINI_VISION_MODEL?.trim() || "gemini-2.5-flash";
   const ai = new GoogleGenAI({ apiKey });
   let response: Awaited<ReturnType<typeof ai.models.generateContent>>;
+  const imageParts = normalized.map((item) => ({
+    inlineData: {
+      mimeType: item.mimeType,
+      data: item.data,
+    },
+  }));
   try {
     response = await ai.models.generateContent({
       model,
       contents: [
         {
-          parts: [
-            { text: MENU_PROMPT },
-            {
-              inlineData: {
-                mimeType: mimeType && mimeType.length > 0 ? mimeType : "image/jpeg",
-                data: data,
-              },
-            },
-          ],
+          role: "user",
+          parts: [...imageParts, { text: MENU_PROMPT }],
         },
       ],
       config: {
@@ -340,16 +367,33 @@ export async function parseMenuFromImageBase64(
       },
     });
   } catch (error) {
-    if (isGeminiApiFailure(error)) {
+    if (shouldUseOfflineFallback(error)) {
       console.error("[parseMenuFromImage] Falling back to cached menu:", error);
-      await wait(2000);
       return { categories: FALLBACK_MENU, usedFallback: true };
     }
     throw error;
   }
 
-  const cleaned = stripResponseMarkdown(response.text);
-  const parsed: unknown = JSON.parse(cleaned || "[]");
+  const rawText =
+    typeof response.text === "string" && response.text.trim()
+      ? response.text
+      : extractTextFromCandidateParts(response);
+  if (!rawText?.trim()) {
+    console.error("[parseMenuFromImage] Empty model response", {
+      hasCandidates: Boolean(response.candidates?.length),
+      finishReason: response.candidates?.[0]?.finishReason,
+    });
+    throw new Error("Empty response from vision model");
+  }
+
+  const cleaned = stripResponseMarkdown(rawText);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned || "[]");
+  } catch (e) {
+    console.error("[parseMenuFromImage] JSON parse failed:", e, "snippet:", cleaned.slice(0, 500));
+    throw new Error("Model returned invalid JSON");
+  }
   const result = normalizeToCategoryArray(parsed);
 
   const categories = result.map((cat: any, i: number) => ({

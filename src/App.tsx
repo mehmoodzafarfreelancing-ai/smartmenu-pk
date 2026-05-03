@@ -7,7 +7,7 @@ import MenuDisplay from './components/MenuDisplay';
 import OrderSummaryBar from './components/OrderSummaryBar';
 import OrderSlipModal from './components/OrderSlipModal';
 import { Language, MenuCategory, MenuItem, OrderLine } from './types';
-import { scanMenuImage, ScanMenuError } from './lib/scanMenu';
+import { scanMenuImages, ScanMenuError } from './lib/scanMenu';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, CloudOff } from 'lucide-react';
 import { countItemsInOrder, formatPkr, subtotalFromOrder } from './utils/orderMoney';
@@ -15,6 +15,7 @@ import { countItemsInOrder, formatPkr, subtotalFromOrder } from './utils/orderMo
 const HIGH_TRAFFIC_MSG =
   'AI is experiencing high traffic. Please try scanning again!';
 const OFFLINE_FALLBACK_MSG = 'Server unavailable right now. Showing prebuilt demo menu.';
+const SCAN_GENERIC_FAIL_MSG = 'Menu scan failed. Please try again.';
 
 function isServiceUnavailableError(error: unknown): boolean {
   if (error instanceof ScanMenuError && error.status === 503) {
@@ -53,11 +54,11 @@ export default function App() {
   const subtotal = useMemo(() => subtotalFromOrder(currentOrder), [currentOrder]);
   const hasOrder = orderItemCount > 0;
 
-  const handleScan = async (file: File) => {
+  const handleScan = async (imageBase64Strings: string[]) => {
     setToastMessage(null);
     setIsScanning(true);
     try {
-      const result = await scanMenuImage(file);
+      const result = await scanMenuImages(imageBase64Strings);
       console.log('[App] menu data after parse (ready for state):', result.categories);
       setParsedData(result.categories ?? []);
       if (result.usedFallback) {
@@ -67,6 +68,10 @@ export default function App() {
       console.error('Failed to parse menu:', error);
       if (isServiceUnavailableError(error)) {
         setToastMessage(HIGH_TRAFFIC_MSG);
+      } else if (error instanceof ScanMenuError) {
+        setToastMessage(error.message?.trim() ? error.message : SCAN_GENERIC_FAIL_MSG);
+      } else {
+        setToastMessage(SCAN_GENERIC_FAIL_MSG);
       }
     } finally {
       setIsScanning(false);
@@ -160,7 +165,7 @@ export default function App() {
               <a href="#" className="text-[11px] uppercase tracking-[0.2em] font-bold text-white/30 hover:text-brand-primary transition-colors">Terms</a>
             </nav>
             <p className="text-[11px] text-white/10 font-sans leading-relaxed">
-              &copy; 2026 SmartMenu PK &bull; All Rights Reserved
+              &copy; {new Date().getFullYear()} SmartMenu PK &bull; All Rights Reserved
             </p>
           </div>
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Camera, Loader2, X, Image as ImageIcon, Sparkles } from 'lucide-react';
 import { compressImageForScan } from '@/utils/compressImageForScan';
@@ -10,27 +10,41 @@ const LOADING_SUBLINES = [
   'Curating your digital experience...',
 ];
 
+type StagedSlot = { file: File; previewUrl: string };
+
 interface ScannerProps {
-  onScan: (file: File) => void;
+  onScan: (imageBase64Strings: string[]) => void;
   isScanning: boolean;
 }
 
-export default function Scanner({ onScan, isScanning }: ScannerProps) {
-  const [preview, setPreview] = useState<string | null>(null);
-  const [loadingLineIndex, setLoadingLineIndex] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const previewObjectUrl = useRef<string | null>(null);
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error ?? new Error('read failed'));
+    r.readAsDataURL(file);
+  });
+}
 
-  const revokePreview = () => {
-    if (previewObjectUrl.current) {
-      URL.revokeObjectURL(previewObjectUrl.current);
-      previewObjectUrl.current = null;
+export default function Scanner({ onScan, isScanning }: ScannerProps) {
+  const [staged, setStaged] = useState<StagedSlot[]>([]);
+  const [loadingLineIndex, setLoadingLineIndex] = useState(0);
+  const firstInputRef = useRef<HTMLInputElement>(null);
+  const secondInputRef = useRef<HTMLInputElement>(null);
+  const stagedRef = useRef(staged);
+  stagedRef.current = staged;
+
+  const revokeUrls = useCallback((slots: StagedSlot[]) => {
+    for (const s of slots) {
+      URL.revokeObjectURL(s.previewUrl);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    return () => revokePreview();
-  }, []);
+    return () => {
+      revokeUrls(stagedRef.current);
+    };
+  }, [revokeUrls]);
 
   useEffect(() => {
     if (!isScanning) {
@@ -44,31 +58,69 @@ export default function Scanner({ onScan, isScanning }: ScannerProps) {
     return () => window.clearInterval(id);
   }, [isScanning]);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    revokePreview();
-    const url = URL.createObjectURL(file);
-    previewObjectUrl.current = url;
-    setPreview(url);
-    try {
-      const compressed = await compressImageForScan(file);
-      onScan(compressed);
-    } catch (err) {
-      console.error('Image compression failed, sending original:', err);
-      onScan(file);
-    }
+  const clearAll = () => {
+    setStaged((prev) => {
+      revokeUrls(prev);
+      return [];
+    });
+    if (firstInputRef.current) firstInputRef.current.value = '';
+    if (secondInputRef.current) secondInputRef.current.value = '';
   };
 
-  const clear = () => {
-    revokePreview();
-    setPreview(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const handleFirstFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    let outFile = file;
+    try {
+      outFile = await compressImageForScan(file);
+    } catch (err) {
+      console.error('Image compression failed, using original:', err);
+    }
+
+    const previewUrl = URL.createObjectURL(outFile);
+    setStaged((prev) => {
+      revokeUrls(prev);
+      return [{ file: outFile, previewUrl }];
+    });
   };
+
+  const handleSecondFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (stagedRef.current.length >= 2) return;
+
+    let outFile = file;
+    try {
+      outFile = await compressImageForScan(file);
+    } catch (err) {
+      console.error('Image compression failed, using original:', err);
+    }
+
+    const previewUrl = URL.createObjectURL(outFile);
+    setStaged((p) => {
+      if (p.length >= 2) {
+        URL.revokeObjectURL(previewUrl);
+        return p;
+      }
+      return [...p, { file: outFile, previewUrl }];
+    });
+  };
+
+  const processMenu = async () => {
+    if (staged.length === 0 || isScanning) return;
+    const images = await Promise.all(staged.map((s) => readFileAsDataURL(s.file)));
+    onScan(images);
+  };
+
+  const hasStaged = staged.length > 0;
+  const emptyCardClickable = !isScanning && !hasStaged;
 
   return (
     <section className="relative px-6 pt-10 pb-16 overflow-hidden max-w-7xl mx-auto">
-      {/* Decorative background elements */}
       <div className="absolute top-0 right-0 -mr-20 -mt-20 w-96 h-96 bg-brand-primary/5 blur-[120px] rounded-full" />
       <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-96 h-96 bg-brand-accent/5 blur-[120px] rounded-full" />
 
@@ -78,7 +130,7 @@ export default function Scanner({ onScan, isScanning }: ScannerProps) {
         className="relative z-10 grid lg:grid-cols-2 gap-12 items-center"
       >
         <div className="mb-10 lg:mb-0 text-center lg:text-left">
-          <motion.div 
+          <motion.div
             initial={{ scale: 0.9 }}
             animate={{ scale: 1 }}
             className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-primary/10 border border-brand-primary/20 text-brand-primary text-[10px] font-bold uppercase tracking-widest mb-6 lg:ml-0 mx-auto"
@@ -87,33 +139,41 @@ export default function Scanner({ onScan, isScanning }: ScannerProps) {
             AI Powered Scanner
           </motion.div>
           <h2 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6 tracking-tight leading-[1.1]">
-            Magical Menu <br/><span className="text-brand-primary">Transformation</span>
+            Magical Menu <br />
+            <span className="text-brand-primary">Transformation</span>
           </h2>
           <p className="text-white/40 text-base md:text-lg max-w-[400px] lg:mx-0 mx-auto leading-relaxed">
             Snap a photo of any physical menu and let our AI curate your digital dining experience instantly.
           </p>
         </div>
 
-        <motion.div 
+        <motion.div
           layout
-          onClick={() => !isScanning && fileInputRef.current?.click()}
+          onClick={() => emptyCardClickable && firstInputRef.current?.click()}
           className={`
             relative aspect-[4/5] md:aspect-video lg:aspect-[4/5] rounded-[3rem] border border-white/10 
-            transition-all duration-700 flex flex-col items-center justify-center cursor-pointer overflow-hidden
+            transition-all duration-700 flex flex-col items-center justify-center overflow-hidden
             shadow-[0_40px_80px_-15px_rgba(0,0,0,0.8)]
-            ${preview ? 'bg-deep-black border-brand-primary/20' : 'bg-surface-dark/40 hover:bg-surface-dark/60 hover:border-brand-primary/30'}
+            ${hasStaged || isScanning ? 'bg-deep-black border-brand-primary/20' : 'bg-surface-dark/40 hover:bg-surface-dark/60 hover:border-brand-primary/30'}
+            ${emptyCardClickable ? 'cursor-pointer' : ''}
             ${isScanning ? 'pointer-events-none' : ''}
           `}
         >
           <input
             type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
+            ref={firstInputRef}
+            onChange={handleFirstFileChange}
+            accept="image/*"
+            className="hidden"
+          />
+          <input
+            type="file"
+            ref={secondInputRef}
+            onChange={handleSecondFileChange}
             accept="image/*"
             className="hidden"
           />
 
-          {/* Grain texture overlay */}
           <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://grainy-gradients.vercel.app/noise.svg')]" />
 
           <AnimatePresence mode="wait">
@@ -123,7 +183,7 @@ export default function Scanner({ onScan, isScanning }: ScannerProps) {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col items-center"
+                className="flex flex-col items-center z-10"
               >
                 <div className="relative mb-6">
                   <div className="absolute inset-0 bg-brand-primary/20 blur-3xl rounded-full scale-150 animate-pulse" />
@@ -145,33 +205,64 @@ export default function Scanner({ onScan, isScanning }: ScannerProps) {
                   </AnimatePresence>
                 </div>
               </motion.div>
-            ) : preview ? (
+            ) : hasStaged ? (
               <motion.div
-                key="preview"
+                key="staged"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="absolute inset-0"
+                exit={{ opacity: 0 }}
+                className="relative z-10 flex flex-col items-center justify-center gap-6 px-6 py-8 w-full h-full"
               >
-                <img src={preview} alt="Menu preview" className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-deep-black via-transparent to-black/30" />
-                
-                <div className="absolute bottom-8 inset-x-8 flex flex-col items-center">
-                  <p className="text-white/60 text-[10px] uppercase tracking-widest font-bold mb-4">Photo Captured</p>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); clear(); }}
-                    className="flex items-center gap-2 px-6 py-3 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl text-white text-sm font-bold hover:bg-red-500/20 hover:border-red-500/40 transition-all"
+                <p className="text-white/60 text-[10px] uppercase tracking-widest font-bold">
+                  {staged.length === 2 ? 'Front & back' : 'Photo captured'}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-4">
+                  {staged.map((slot, i) => (
+                    <div
+                      key={slot.previewUrl}
+                      className="relative w-[min(44vw,11rem)] aspect-[3/4] rounded-2xl overflow-hidden border border-white/15 shadow-lg"
+                    >
+                      <img
+                        src={slot.previewUrl}
+                        alt={i === 0 ? 'Menu page 1' : 'Menu page 2'}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-col sm:flex-row flex-wrap items-stretch justify-center gap-3 w-full max-w-md">
+                  {staged.length < 2 && (
+                    <button
+                      type="button"
+                      onClick={() => secondInputRef.current?.click()}
+                      className="flex-1 min-h-[44px] px-4 py-3 rounded-2xl text-sm font-bold border border-white/20 bg-white/5 text-white hover:bg-white/10 hover:border-brand-primary/40 transition-all"
+                    >
+                      Add Back Page (Optional)
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={processMenu}
+                    className="flex-1 min-h-[44px] px-4 py-3 rounded-2xl text-sm font-bold premium-gradient text-black hover:opacity-95 transition-opacity"
                   >
-                    <X className="w-4 h-4" />
-                    Discard Image
+                    Process Menu
                   </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl text-white text-xs font-bold hover:bg-red-500/20 hover:border-red-500/40 transition-all"
+                >
+                  <X className="w-4 h-4" />
+                  Discard
+                </button>
               </motion.div>
             ) : (
               <motion.div
                 key="empty"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="flex flex-col items-center text-center px-10"
+                className="flex flex-col items-center text-center px-10 pointer-events-none"
               >
                 <div className="w-24 h-24 premium-gradient rounded-[2rem] flex items-center justify-center mb-8 shadow-2xl shadow-brand-primary/20 -rotate-3 hover:rotate-0 transition-transform duration-500">
                   <Camera className="w-10 h-10 text-black" />
