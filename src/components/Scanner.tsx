@@ -151,8 +151,9 @@ export default function Scanner({ onScan, isScanning }: ScannerProps) {
           layout
           onClick={() => emptyCardClickable && firstInputRef.current?.click()}
           className={`
-            relative aspect-[4/5] md:aspect-video lg:aspect-[4/5] rounded-[3rem] border border-white/10 
-            transition-all duration-700 flex flex-col items-center justify-center overflow-hidden
+            relative rounded-[3rem] border border-white/10 
+            transition-all duration-700 flex flex-col items-center justify-center
+            ${hasStaged ? 'aspect-auto overflow-visible py-4' : 'aspect-[4/5] md:aspect-video lg:aspect-[4/5] overflow-hidden'}
             shadow-[0_40px_80px_-15px_rgba(0,0,0,0.8)]
             ${hasStaged || isScanning ? 'bg-deep-black border-brand-primary/20' : 'bg-surface-dark/40 hover:bg-surface-dark/60 hover:border-brand-primary/30'}
             ${emptyCardClickable ? 'cursor-pointer' : ''}
@@ -164,6 +165,7 @@ export default function Scanner({ onScan, isScanning }: ScannerProps) {
             ref={firstInputRef}
             onChange={handleFirstFileChange}
             accept="image/*"
+            capture="environment"
             className="hidden"
           />
           <input
@@ -171,6 +173,7 @@ export default function Scanner({ onScan, isScanning }: ScannerProps) {
             ref={secondInputRef}
             onChange={handleSecondFileChange}
             accept="image/*"
+            capture="environment"
             className="hidden"
           />
 
